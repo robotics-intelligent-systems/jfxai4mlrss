@@ -73,29 +73,99 @@ SIM        PROPULSION   SciML        CO-SIM
 
 ## Reference Architecture
 
-``` text
-ENGINEERING EXPERIENCE
-Mission Designer | Systems Engineer | GNC | Analyst
-                         |
-MISSION SERVICES
-CONOPS | Trajectory | Vehicle | Payload | Ground
-                         |
-OPENTWIN CORE
-Twin Registry | State | Events | Models | Provenance
-                         |
-SIMULATION
-6-DOF | Aerodynamics | Propulsion | Separation | Orbit
-                         |
-FLIGHT SOFTWARE / AVIONICS
-GNC | Telemetry | Command | FSW | Hardware Models
-                         |
-DATA / AI
-Telemetry | Test Data | Physics AI | SciML | Logs
+**Integration status:** this is a reference architecture for civil spaceflight,
+student research and virtual verification. Catalog entries describe upstream
+resources; the jfxai4mlrss adapters below are proposed, not implemented or
+validated by this documentation update. Source review date: 2026-09-20.
+
+```mermaid
+flowchart TD
+    R["Requirements and CONOPS"] --> C["Scenario and configuration registry"]
+    C --> O["Experiment coordinator"]
+    O --> M["Mission analysis adapter"]
+    O --> D["Dynamics and environment adapter"]
+    O --> F["Flight software test adapter"]
+    D <--> S["Subsystem co-simulation"]
+    F <--> G["Ground software test endpoint"]
+    M --> T["Twin state, events and provenance"]
+    D --> T
+    F --> T
+    G --> T
+    T --> V["Visualization and replay"]
+    T --> A["Verification and Physics AI evaluation"]
+    A --> R
 ```
 
-Cross-cutting concerns: **Safety · Configuration Management ·
-Reproducibility · Cybersecurity · Verification · Provenance · Open
-Interfaces · Observability**.
+| Layer | Responsibility | Candidate technologies |
+| --- | --- | --- |
+| Requirements and configuration | CONOPS, model identities, versioned scenarios and requirement-to-test links | Capella/Arcadia, OpenTwin registry |
+| Mission analysis | Scenario preparation and orbital-analysis products | General Mission Analysis Tool (GMAT) |
+| Dynamics | One authoritative state propagator per simulated entity and phase | RocketPy, MAPLEAF, Cambridge simulators, JSBSim; other tools under separate profiles |
+| Subsystems and robotics | Multidomain models and system-level interaction | LunCo; proposed Modelica/FMI boundary where supported |
+| Flight software | Host-based application execution, simulated I/O and test evidence | cFS, F´, Adamant |
+| Ground segment | Decode, display, record and replay simulated telemetry | LBR-26, framework-specific ground tools |
+| Scene and presentation | Human-readable mission/world visualization | Orbiter, sfsim, OpenSpace, optional FlightGear |
+| Data and evaluation | Run archive, comparison, uncertainty and surrogate assessment | OpenTwin provenance, NVIDIA PhysicsNeMo |
+
+These components are alternatives or complementary services, not a mandatory
+single stack. A renderer is not automatically a validated dynamics engine.
+A flight-software framework is not a spacecraft model. A public hardware
+design is not a portable software driver.
+
+### Boundary contracts
+
+| Contract | Required information |
+| --- | --- |
+| Model identity | Model and asset IDs, upstream revision, license, configuration hash, intended use and fidelity limits |
+| State | Simulation timestamp, reference frame, central body, position/velocity, attitude convention, units and validity |
+| Time | Epoch, time scale, simulation versus wall clock, step policy and reset semantics |
+| Environment | Atmosphere/gravity/ephemeris source, version, applicable domain and assumptions |
+| Telemetry | Dictionary version, field ID/type/unit, acquisition time, source, sequence and quality flags |
+| Simulated commands | Schema version, destination test endpoint, correlation ID and acknowledgment state |
+| Events | Event ID/type, source entity, simulation time, configuration revision and causal reference |
+| Results | Inputs, seeds, solver settings, software versions, outputs, uncertainty and verification evidence |
+
+Use SI units at canonical interfaces and explicit conversion at tool
+boundaries. Label inertial, Earth-fixed, local and body frames; specify
+quaternion ordering and altitude datum. UTC, TAI and TT are not interchangeable.
+Preserve the selected ephemeris and time-conversion data with a run.
+
+The coordinator owns the simulation clock and lifecycle: configure,
+initialize, ready, run, pause, reset and stop. Batch studies, interactive
+visualization and hardware-paced tests require separate timing policies.
+Declare a single state owner and reject incompatible configurations.
+
+### Integration paths
+
+| Path | Proposed exchange | Admission condition |
+| --- | --- | --- |
+| Mission tool to run archive | Versioned initial conditions and ephemeris/result files | Explicit frames, epoch, units and tool-specific import/export mapping |
+| Dynamics engine to twin | State snapshots and lifecycle events | Adapter schema, reproducible initialization and solver-domain checks |
+| CAD to model registry | Geometry/configuration references and derived properties | Unit checks and reviewed mass-property provenance; no automatic fidelity claim |
+| Subsystems to coordinator | Typed service or qualified FMU interface | Tool support, solver ownership and coupling tests |
+| FSW to simulated hardware | Framework-specific drivers and synthetic sensor data | Target/toolchain pinning, deterministic fixtures and dictionary mapping |
+| Ground endpoint to twin | Decoded telemetry and replay records | Schema/version agreement and transport qualification |
+| Twin to viewer | Read-only state/ephemeris presentation | Correct frame/time conversion; interpolation does not overwrite physics |
+| Run archive to Physics AI | Versioned datasets and reference results | Separate training/evaluation data and declared validity envelope |
+
+Begin with offline file exchange and recorded replay. Add live co-simulation
+only after boundary tests pass. Shared use of TCP, UDP, protobuf or FMI does
+not guarantee compatible data semantics.
+
+### Execution profiles
+
+| Profile | Initial composition | Deliverable |
+| --- | --- | --- |
+| Mission analysis | GMAT plus result import and OpenSpace presentation | Traceable analysis and visualization package |
+| Educational dynamics | One qualified RocketPy, MAPLEAF, Cambridge or JSBSim backend | Repeatable simulation record and comparison report |
+| Virtual spaceflight | Orbiter or sfsim with an explicit state adapter | Interactive scenario with documented physics limitations |
+| Robotics / CONOPS | LunCo and selected supported subsystem models | System-level behavior and event trace |
+| FSW software-in-the-loop | One of cFS, F´ or Adamant with synthetic I/O | Host-based tests and telemetry replay |
+| Ground-system replay | LBR-26 virtual mode or framework-specific ground tools | Recorded-data decoding and interface checks |
+| Physics AI evaluation | PhysicsNeMo and a frozen reference dataset | Error, uncertainty and out-of-domain report |
+
+Cross-cutting concerns remain configuration management, reproducibility,
+observability, verification and provenance.
 
 ## OpenTwin Aerospace Model
 
@@ -160,23 +230,51 @@ Mission Plan
 
 ## Flight Software and Avionics
 
-Potential integration areas include cFS, F´, model-based flight
-software, ground software, telemetry/command, software-in-the-loop and
-hardware-in-the-loop research workflows.
+Treat cFS, F´ and Adamant as **alternative framework profiles** with different
+component models, runtimes, build systems and telemetry definitions. Their
+applications are not binary-compatible plug-ins.
 
-``` text
-Mission Application
-       |
-Flight Software Framework
-       |
-GNC / Telemetry / Command
-       |
-Hardware Abstraction
-       |
-SIL / HIL Model
-       |
-OpenTwin Telemetry Adapter
-```
+| Framework | Upstream architecture | jfxai4mlrss integration proposal |
+| --- | --- | --- |
+| cFS | OSAL, Platform Support Package (PSP), Central Flight Executive (cFE), libraries and applications | Pin the bundle and submodules; host-based test application, simulated drivers and telemetry adapter |
+| F´ / F Prime | Component-driven C++ framework, modeled interfaces, generated code and testing tools | Versioned topology and dictionaries, synthetic components and ground-test adapter |
+| Adamant | YAML-based component models, generated structure and handwritten Ada behavior | Pin compiler/generator versions and map typed component outputs to twin records |
+
+The [public cFS bundle](https://github.com/nasa/cFS) explicitly distinguishes
+its example/lab configuration from a mission-specific flight distribution.
+Successful execution of a sample does not validate a complete mission system.
+
+Astraeus-I, HPR flight-computer software and FC-Udev are hardware or embedded
+software references. Any later board profile must identify exact revision,
+driver interfaces and test evidence; no compatibility with cFS, F´ or Adamant
+is assumed.
+
+For the initial profile, synthetic sensor fixtures and virtual ground
+endpoints exercise telemetry, event handling, timing and reset. Record the
+FSW build, packet dictionary, simulated hardware configuration and scenario
+together. LBR-26's reviewed implementation offers virtual/hardware modes and
+recorded-data replay; use the virtual/replay path for the documentation MVP.
+
+## Digital Twin Evidence and Validation
+
+A standalone simulated vehicle is a virtual model. A connected digital twin
+also requires an identified asset, configuration correspondence, synchronized
+observations and an explicit account of uncertainty.
+
+| Gate | Evidence required |
+| --- | --- |
+| Source | Identified upstream, pinned revision, code/data/asset license and dependency inventory |
+| Model | Intended use, assumptions, fidelity envelope and reference cases |
+| Interface | Units, frames, clock, schema compatibility, reset and stale-data behavior |
+| Numerical | Appropriate reference comparisons, solver sensitivity and reproducibility tolerances |
+| FSW/ground | Simulated I/O traces, dictionary consistency, replay and error-handling tests |
+| AI | Dataset provenance, held-out evaluation, error limits and out-of-domain detection |
+| Release | Requirement-to-test traceability, limitations and repeatable build/run manifest |
+
+Track status separately as **cataloged**, **adapter implemented**,
+**integration tested**, and **validated for a named use case**. This change
+only updates the architecture and catalog. NASA-derived check cases can help
+verify selected numerical behavior; they do not certify every vehicle model.
 
 ## Physics AI and Scientific Machine Learning
 
@@ -228,74 +326,106 @@ virtual simulation and performance analysis.
 
 ## Open-Source Technology Compendium
 
-  -----------------------------------------------------------------------
-  Domain                  Candidate / Reference   Potential Role
-  ----------------------- ----------------------- -----------------------
-  Student Space           OpenSASI                Student/amateur space
-                                                  reference
+All resources below are optional candidates or references. Links identify
+reviewed upstream material, not working jfxai4mlrss integrations. Preserve the
+difference between source-code licensing, data/asset rights, hardware
+documentation and proprietary runtime requirements.
 
-  Mission Analysis        GMAT                    Mission design and
-                                                  trajectory analysis
+### 1. Student space initiatives and historical references
 
-  Spaceflight Simulation  Orbiter                 Spaceflight simulation
-                                                  reference
+| Resource | Category and proposed role | Qualification |
+| --- | --- | --- |
+| OpenSASI — Open Student-Amateur Space Initiative | Requested student/amateur space initiative reference | Exact authoritative project URL and license remain unresolved; retain in the research backlog |
+| [Lambda-4S](https://github.com/open-aerospace/Lambda-4S) | Historical orbital-launch-vehicle data and drawings | Reference collection, not a simulation engine; review individual sources and do not repeat unverified size/ranking claims |
+| [Aerobee / Aerobee 150A](https://github.com/open-aerospace/Aerobee-150) | Historical sounding-rocket digital reconstruction | Separate reconstruction code/graphics from original documentation and its rights |
+| [TrinetraOne](https://github.com/ChinmayBhattt/TrinetraOne-OpenRocket) | Example vehicle project modeled using OpenRocket | A design asset/project, not an independent physics framework or validated reference case |
 
-  Flight Software         Adamant                 Model-based flight
-                                                  software
+### 2. Mission analysis and interactive spaceflight
 
-  3D Simulation           sfsim                   Spaceflight simulation
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [General Mission Analysis Tool (GMAT)](https://software.nasa.gov/software/GSC-17177-1) | Mission and trajectory-analysis products | NASA catalog identifies the tool; select a specific distribution and document its interfaces before integration |
+| [Orbiter](https://github.com/orbitersim/orbiter) | Interactive Newtonian spaceflight simulation | Core MIT license; graphics clients and add-ons have separate terms; qualify build platform and scenario APIs |
+| [sfsim](https://github.com/wedesoft/sfsim) | Experimental 3D spaceflight/spaceplane visualization and simulation | Upstream describes work in progress; verify physics scope, graphics requirements and distribution terms |
 
-  Robotics Co-Simulation  LunCo                   System-level
-                                                  engineering / CONOPS
+### 3. Flight dynamics and trajectory frameworks
 
-  Visualization           OpenSpace               Astrovisualization
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [MAPLEAF — 6-DOF Rocket Flight Simulation Framework](https://github.com/henrystoldt/MAPLEAF) | Modular dynamics backend candidate | Pin Python/build dependencies and qualify model assumptions; optional rendering/parallel packages are separate |
+| [Cambridge Rocketry Simulator](https://github.com/ChrisEilbeck/CambridgeRocketrySimulator) | Legacy six-degree-of-freedom simulator reference | Reviewed repository is a fork of the earlier simulator; retain upstream provenance and GPL terms |
+| [CamPyRoS](https://github.com/cuspaceflight/CamPyRoS) | Related Cambridge Python 6DOF simulator candidate | Distinct codebase; dependency/platform support and incomplete features need version-specific review |
+| [RocketPy](https://github.com/RocketPy-Team/RocketPy) | Python trajectory-simulation candidate | Validate each model/dataset and adapter; no universal orbital or vehicle-fidelity claim |
+| [JSBSim Manager](https://github.com/natronics/JSBSim-Manager) | Notebook/configuration workflow around JSBSim | Prototype orchestration reference, not JSBSim itself; dependency compatibility requires review |
+| [JSBSim](https://github.com/JSBSim-Team/jsbsim) | General flight-dynamics engine boundary | Separate engine verification from correctness of individual vehicle models |
 
-  Physics AI              NVIDIA PhysicsNeMo      SciML / Physics AI
+### 4. Aerodynamics, propulsion and specialized research
 
-  Ground Software         LBR-26                  Ground-side software
-                                                  reference
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [Practical calculation of the aerodynamic characteristics of slender finned vehicles / barrowman](https://github.com/open-aerospace/barrowman) | Analytical-method/software reference | Reviewed README lists features as TODO; implementation completeness and method applicability require independent assessment |
+| [HyperSIM — nonlinear hypersonic flight dynamics](https://github.com/F35-Vin-Desh/HyperSIM) | MATLAB/FlightGear academic simulation reference | README describes a 3-DOF vehicle; six ordinary differential equations are not six degrees of freedom. MATLAB/Simulink requirements keep this outside a fully libre execution baseline |
+| [EnSim](https://github.com/SpaceEngineerSS/EnSim) | Desktop/Python propulsion-analysis and flight-simulation candidate | Upstream presents preliminary-design and educational analysis; qualify each model and exported result separately |
 
-  Avionics                Astraeus-I              Avionics-development
-                                                  reference
+These entries document research scope and adapter roles. They do not supply
+vehicle design parameters, propulsion construction instructions or a
+validated end-to-end launch system.
 
-  Aerodynamics            Slender finned vehicle  Analysis reference
-                          methods                 
+### 5. CAD and system-level robotics co-simulation
 
-  Hypersonics             MATLAB/FlightGear       Flight-dynamics
-                          simulation              research
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [FreeCAD Rocketry Workbench](https://github.com/davesrocketshop/Rocket) | Parametric geometry and configuration provenance | Reviewed current workbench requires FreeCAD 1.0; pin a compatible pair and review derived properties before simulation import |
+| [LunCo / LunCoSim](https://github.com/LunCoSim/lunco-sim) | System-Level Engineering, robotics co-simulation and CONOPS | Reviewed workbench connects vehicles, environments and subsystem models; fidelity and supported couplings are scenario-specific |
+| Arcadia / Capella | Requirements and logical/physical architecture traceability | Proposed links from requirement IDs to model versions and test reports |
 
-  Propulsion              EnSim                   Propulsion/flight
-                                                  simulation
+### 6. Reusable flight-software frameworks
 
-  6-DOF                   MAPLEAF                 Rocket flight
-                                                  simulation
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [Adamant](https://github.com/lasp/adamant) | Model-based embedded/flight-software profile | Apache-2.0 framework; YAML generators and Ada behavior require a qualified toolchain |
+| [NASA Core Flight System (cFS)](https://github.com/nasa/cFS) | Reusable, mission-independent framework profile | OSAL + PSP + cFE + libraries/apps; pin submodules and distinguish public lab bundle from a mission distribution |
+| [F´ / F Prime](https://github.com/nasa/fprime) | Component-driven spaceflight/embedded software profile | Model/code-generation and C++ component ecosystem; mission application and platform validation remain separate |
 
-  6-DOF                   Cambridge rocketry      Rocket simulation
-                          simulator               
+### 7. Avionics, embedded computers and ground software
 
-  Trajectory              RocketPy                Trajectory simulation
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [LBR-26 Ground Software](https://github.com/Long-Beach-Rocketry/LBR-26-Ground-Software) | Ground-side transport, decoding and replay candidate | Reviewed LoRa module includes virtual mode, local transports, NDJSON replay and protobuf/nanopb generation; schemas need explicit mapping |
+| [Astraeus-I avionics development board](https://github.com/Astraeus-Library/Astraeus-I-Board) | Board-level interface and hardware-documentation reference | Schematic/layout repository with CC BY 4.0 indication; firmware and board revisions must be identified separately |
+| [Advanced flight computer software for high-powered rockets — HPR Rocket Flight Computer](https://github.com/SparkyVT/HPR-Rocket-Flight-Computer) | Embedded telemetry and flight-computer research reference | Hardware-specific project; upstream performance claims are not jfxai4mlrss verification evidence |
+| [FC-Udev Flight Software](https://github.com/Cosmic-Aerospace-Technologies/FC-Udev) | Arduino-oriented model-rocket telemetry/software reference | README states noncommercial/educational availability; resolve license terms before classifying as unrestricted open source or redistributing |
 
-  Flight Dynamics         JSBSim                  Flight-dynamics
-                                                  simulation
+### 8. Astrovisualization and Physics AI
 
-  CAD                     FreeCAD Rocketry        Rocket CAD workflow
-                          Workbench               
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [OpenSpace](https://github.com/OpenSpace/OpenSpace) | Astrovisualization of observations, simulation and mission products | Presentation layer; dataset/asset licensing and time/frame mapping need separate checks |
+| [NVIDIA PhysicsNeMo](https://github.com/NVIDIA/physicsnemo) | SciML / Physics AI training, fine-tuning and inference experiments | PyTorch-based framework; qualify accelerator dependencies, model/data licenses and numerical evidence. A learned model does not inherit solver validation |
 
-  Flight Software         FC-Udev                 Model-rocket software
+### 9. Verification and provenance references
 
-  Validation              NASA/JSBSim cases       Validation reference
+| Resource | Proposed role | Qualification |
+| --- | --- | --- |
+| [NASA simulation test cases to JSBSim](https://github.com/open-aerospace/jsbsim-nasa-test-cases) | Candidate numerical regression/reference-case collection | Community attempt to apply NASA-published check cases; not a NASA certification or proof that all cases pass |
+| Versioned run archive | Inputs, outputs, seeds, schemas and reference comparisons | Proposed jfxai4mlrss service, not a bundled upstream tool |
+| Model and dependency registry | License, revision, fidelity and test status for each component | Admit a component only for explicitly documented profiles |
 
-  Flight Software         NASA cFS                Reusable flight
-                                                  software
+### Admission and licensing policy
 
-  Flight Software         F´                      Component-driven flight
-                                                  framework
+For each candidate record the upstream URL, fork relationship, revision,
+license, data/asset rights, runtime, adapter/schema version, intended use,
+validation status and open issues. Unresolved identity or license means
+**reference only**, not an installed dependency.
 
-  MBSE                    Arcadia / Capella       Systems engineering
-  -----------------------------------------------------------------------
+A proposed libre baseline can begin with one qualified dynamics backend,
+recorded-data exchange and open visualization tools. Keep MATLAB/Simulink
+references, restricted-use firmware, hardware-specific dependencies and
+unverified model assets in separate optional profiles.
 
-Inclusion does not imply endorsement, bundling, production readiness,
-maintenance status, or license compatibility.
+Inclusion does not imply endorsement, bundling, maintenance guarantees,
+license compatibility or a tested integration. The OpenSASI source remains
+an explicit follow-up item rather than a guessed link.
 
 ## User Guide
 
@@ -407,6 +537,9 @@ verification evidence and no mandatory proprietary cloud.
 -   [x] Source technology consolidation.
 -   [x] OpenTwin aerospace architecture.
 -   [x] Initial twin taxonomy.
+-   [x] Categorized compendium with source links and qualification notes.
+-   [x] Integration layers, boundary contracts and execution profiles.
+-   [ ] Resolve OpenSASI upstream identity and candidate license gaps.
 -   [ ] Architecture Decision Records and formal schemas.
 
 ### Phase 2 --- Simulation Core
@@ -414,7 +547,8 @@ verification evidence and no mandatory proprietary cloud.
 -   [ ] Mission and vehicle models.
 -   [ ] Environment.
 -   [ ] 6-DOF and trajectory interfaces.
--   [ ] Results store.
+-   [ ] Results store with model/version provenance and replay.
+-   [ ] Canonical time, frame and unit conversion tests.
 
 ### Phase 3 --- Digital Twins
 
@@ -422,7 +556,7 @@ verification evidence and no mandatory proprietary cloud.
 
 ### Phase 4 --- Flight Software
 
--   [ ] cFS/F´ adapters.
+-   [ ] Separate cFS, F´ and Adamant profiles and adapters.
 -   [ ] SIL workflows.
 -   [ ] Telemetry/command and ground interfaces.
 
